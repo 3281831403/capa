@@ -57,7 +57,6 @@ def test_regex_get_value_str(pattern):
     assert capa.features.common.Regex(pattern).get_value_str() == pattern
 
 
-@pytest.mark.xfail(reason="can't have top level NOT")
 def test_match_only_not():
     rule = textwrap.dedent("""
         rule:
@@ -77,7 +76,6 @@ def test_match_only_not():
     assert "test rule" in matches
 
 
-@pytest.mark.xfail(reason="can't have nested NOT")
 def test_match_not_not():
     rule = textwrap.dedent("""
         rule:
@@ -123,6 +121,85 @@ def test_index_features_and_unstable():
 
     assert not index.string_rules
     assert not index.bytes_prefix_index
+
+
+# this test demonstrates the behavior of unstable features that may change before the next major release.
+def test_index_features_unindexable_rules_unstable():
+    unindexable_rule = textwrap.dedent("""
+        rule:
+            meta:
+                name: unindexable rule
+                scopes:
+                    static: function
+                    dynamic: process
+            features:
+                - not:
+                    - number: 99
+        """)
+    regular_rule = textwrap.dedent("""
+        rule:
+            meta:
+                name: regular rule
+                scopes:
+                    static: function
+                    dynamic: process
+            features:
+                - and:
+                    - mnemonic: mov
+                    - api: CreateFileW
+        """)
+    r1 = capa.rules.Rule.from_yaml(unindexable_rule)
+    r2 = capa.rules.Rule.from_yaml(regular_rule)
+    rr = capa.rules.RuleSet([r1, r2])
+    index: capa.rules.RuleSet._RuleFeatureIndex = rr._feature_indexes_by_scopes[capa.rules.Scope.FUNCTION]
+
+    # the rule with a top-level NOT can't be indexed by any feature,
+    # so it must always be evaluated.
+    assert index.always_rules == {"unindexable rule"}
+
+    # the regular rule is still indexed by its uncommon feature,
+    # so it's only evaluated when that feature is present.
+    assert capa.features.insn.API("CreateFileW") in index.rules_by_feature
+    assert "regular rule" not in index.always_rules
+
+
+# this test demonstrates the behavior of unstable features that may change before the next major release.
+@pytest.mark.parametrize(
+    "statement",
+    [
+        # top level NOT
+        "- not:\n    - number: 99",
+        # nested NOT
+        "- not:\n    - not:\n        - number: 99",
+        # top level count of zero
+        "- count(number(99)): 0",
+        # OR with a NOT branch
+        "- or:\n    - number: 100\n    - not:\n        - number: 99",
+        # OR with a count-of-zero branch
+        "- or:\n    - number: 100\n    - count(number(99)): 0",
+        # AND of only NOT statements
+        "- and:\n    - not:\n        - number: 98\n    - not:\n        - number: 99",
+    ],
+)
+def test_index_features_always_rules_unstable(statement):
+    rule = textwrap.dedent(f"""
+        rule:
+            meta:
+                name: test rule
+                scopes:
+                    static: function
+                    dynamic: process
+            features:
+{textwrap.indent(statement, '                ')}
+        """)
+    r = capa.rules.Rule.from_yaml(rule)
+    rr = capa.rules.RuleSet([r])
+    index: capa.rules.RuleSet._RuleFeatureIndex = rr._feature_indexes_by_scopes[capa.rules.Scope.FUNCTION]
+
+    # these statements can't be indexed by any feature,
+    # so the rule must always be evaluated.
+    assert index.always_rules == {"test rule"}
+    assert not index.rules_by_feature
 
 
 # this test demonstrates the behavior of unstable features that may change before the next major release.

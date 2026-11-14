@@ -16,6 +16,7 @@
 
 ### Bug Fixes
 
+- rules: support rules that can't be indexed by any feature (top-level `not`, nested `not: not:`, `count(...): 0`, and `or`/`some` branches containing them) instead of raising `AssertionError` when constructing a `RuleSet`; such rules are evaluated on every match while all other rules remain feature-indexed
 - fix: elffile: skip section headers with a missing sh_link target @Henglie #3209
 - rules: do not write the ruleset cache when enable_cache is false #3223
 

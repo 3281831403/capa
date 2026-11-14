@@ -27,7 +27,7 @@ from enum import Enum
 from typing import Any, Union, Callable, Iterator, Optional, cast
 from pathlib import Path
 from functools import lru_cache
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 import yaml
 import pydantic
@@ -1876,6 +1876,12 @@ class RuleSet:
         bytes_prefix_index: dict[int, list[tuple[str, bytes]]]
         # Optional Aho-Corasick automaton mapping string literals (lowercased) -> list of (rule_name, feature)
         string_literal_index: Optional[ahocorasick.Automaton] = None
+        # Names of rules that cannot be indexed by any feature,
+        # because they might match even when no particular feature is present.
+        # This includes rules with top-level NOT statements, `count(...): 0`,
+        # or OR/SOME branches that contain such constructs.
+        # These rules must be evaluated on every match.
+        always_rules: set[str] = field(default_factory=set)
 
     # this routine is unstable and may change before the next major release.
     @staticmethod
@@ -1969,8 +1975,11 @@ class RuleSet:
 
                     scores.append(score)
 
-                # otherwise we can't index this rule
-                assert len(scores) > 0
+                if not scores:
+                    # we can't index this AND block:
+                    # none of its children must be present for it to match
+                    # (e.g. all children are NOT statements or optional blocks).
+                    return None
 
                 def and_score_key(item):
                     # order by score, then fewest number of features.
@@ -2012,7 +2021,14 @@ class RuleSet:
 
                 for child in node.children:
                     item = rec(rule_name, child)
-                    assert item is not None, "can't index OR branch"
+
+                    if item is None:
+                        # This branch (e.g. a NOT statement or an optional block)
+                        # may match without any particular feature being present.
+                        # So the whole OR/SOME node may match without any of the
+                        # other branches' features being present, either,
+                        # and we can't index this subtree at all.
+                        return None
 
                     _score, _features = item
                     min_score = min(min_score, _score)
@@ -2032,12 +2048,21 @@ class RuleSet:
         string_literal_automaton: Optional[ahocorasick.Automaton] = ahocorasick.Automaton()
         string_literal_entries: dict[str, list[tuple[str, Feature]]] = collections.defaultdict(list)
 
+        always_rules: set[str] = set()
+
         for rule in rules:
             rule_name = rule.meta["name"]
 
             root = rule.statement
             item = rec(rule_name, root)
-            assert item is not None
+            if item is None:
+                # We can't identify any feature that must be present for this rule to match,
+                # such as for rules with a top-level NOT statement or `count(...): 0`.
+                # So, we must evaluate this rule on every match.
+                logger.debug("indexing: rule has no indexable features, always evaluating: %s", rule_name)
+                always_rules.add(rule_name)
+                scores_by_rule[rule_name] = 0
+                continue
             score, features = item
 
             string_features = [
@@ -2132,6 +2157,7 @@ class RuleSet:
             string_rules,
             dict(bytes_prefix_index),
             string_literal_automaton,
+            always_rules,
         )
 
     @staticmethod
@@ -2270,7 +2296,10 @@ class RuleSet:
         # Find all the rules that could match the given feature set.
         # Ideally we want this set to be as small and focused as possible,
         # and we can tune it by tweaking `_index_rules_by_feature`.
-        candidate_rule_names: set[str] = set()
+        #
+        # Some rules can't be indexed by any feature (e.g. top-level NOT statements),
+        # so they must always be evaluated.
+        candidate_rule_names: set[str] = set(feature_index.always_rules)
         for feature in features:
             candidate_rule_names.update(feature_index.rules_by_feature.get(feature, ()))
 
@@ -2439,13 +2468,11 @@ class RuleSet:
         This wrapper around _match exists so that we can assert it matches precisely
         the same as `capa.engine.match`, just faster.
 
-        This matcher does not handle some edge cases:
+        Rules that can't be indexed by any feature are always evaluated, including:
           - top level NOT statements
-              - also top level counted features with zero occurances, like: `count(menmonic(mov)): 0`
+          - top level counted features with zero occurrences, like: `count(mnemonic(mov)): 0`
           - nested NOT statements (NOT: NOT: foo)
-
-        We should discourage/forbid these constructs from our rules and add lints for them.
-        TODO(williballenthin): add lints for logic edge cases
+          - OR/SOME branches containing any of the above
 
         Args:
           paranoid: when true, demonstrate that the naive matcher agrees with this

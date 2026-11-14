@@ -1,0 +1,116 @@
+- name: process-top-level-not
+  description: a process-scope rule with a top-level not matches when the negated API is never called
+  rules:
+    - name: process-top-level-not
+      description: should match because ExitProcess is never called
+      scopes:
+        dynamic: process
+      features:
+        - not:
+            - api: ExitProcess
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(CreateFileW)
+  expect:
+    matches:
+      process-top-level-not:
+        - "process{pid:3052}"
+
+- name: process-top-level-not-negated
+  description: a process-scope rule with a top-level not does not match when the negated API is called
+  rules:
+    - name: process-top-level-not-negated
+      description: should not match because ExitProcess is called
+      scopes:
+        dynamic: process
+      features:
+        - not:
+            - api: ExitProcess
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(ExitProcess)
+  expect:
+    matches: {}
+
+- name: process-count-zero
+  description: "a process-scope count(...): 0 rule matches when the API is never called"
+  rules:
+    - name: process-count-zero
+      description: should match because WriteFile is never called
+      scopes:
+        dynamic: process
+      features:
+        - count(api(WriteFile)): 0
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(CreateFileW)
+  expect:
+    matches:
+      process-count-zero:
+        - "process{pid:3052}"
+
+- name: process-or-with-not-branch
+  description: a process-scope or with a not branch matches via the not branch alone
+  rules:
+    - name: process-or-not
+      description: should match because ExitProcess is never called
+      scopes:
+        dynamic: process
+      features:
+        - or:
+            - api: WriteFile
+            - not:
+                - api: ExitProcess
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(CreateFileW)
+  expect:
+    matches:
+      process-or-not:
+        - "process{pid:3052}"
+
+- name: thread-nested-not-not
+  description: a thread-scope not under a not behaves like the plain feature
+  rules:
+    - name: thread-not-not
+      description: should match because CreateFileW is called in the thread
+      scopes:
+        dynamic: thread
+      features:
+        - not:
+            - not:
+                - api: CreateFileW
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(CreateFileW)
+  expect:
+    matches:
+      thread-not-not:
+        - "process{pid:3052,tid:3064}"
+
+- name: call-and-of-only-nots
+  description: a call-scope and of only not statements matches when the negated features are absent
+  rules:
+    - name: call-and-of-nots
+      description: should match because neither ExitProcess nor WriteFile is called
+      scopes:
+        dynamic: call
+      features:
+        - and:
+            - not:
+                - api: ExitProcess
+            - not:
+                - api: WriteFile
+  features: |
+    proc: sample.exe (pid=3052)
+     thread: 3064
+      call: 1: api(CreateFileW)
+  expect:
+    matches:
+      call-and-of-nots:
+        - call(1)

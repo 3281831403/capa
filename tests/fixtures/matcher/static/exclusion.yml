@@ -1,0 +1,364 @@
+- name: top-level-not-matches-when-feature-absent
+  description: a rule with a top-level not loads and matches when the negated feature is absent
+  rules:
+    - name: top-level-not-absent
+      description: should match because number 0x99 is absent
+      scopes:
+        static: function
+      features:
+        - not:
+            - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      top-level-not-absent:
+        - 0x402000
+
+- name: top-level-not-does-not-match-when-feature-present
+  description: a rule with a top-level not does not match when the negated feature is present
+  rules:
+    - name: top-level-not-present
+      description: should not match because number 0x99 is present
+      scopes:
+        static: function
+      features:
+        - not:
+            - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+  expect:
+    matches: {}
+
+- name: nested-not-not
+  description: a not under a not behaves like the plain feature
+  rules:
+    - name: nested-not-not
+      description: should match because number 0x10 is present
+      scopes:
+        static: function
+      features:
+        - not:
+            - not:
+                - number: 0x10
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      nested-not-not:
+        - 0x402000
+
+- name: nested-not-not-absent
+  description: a not under a not does not match when the feature is absent
+  rules:
+    - name: nested-not-not-absent
+      description: should not match because number 0x99 is absent
+      scopes:
+        static: function
+      features:
+        - not:
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches: {}
+
+- name: top-level-count-zero
+  description: "count(...): 0 at the top level matches when the feature is absent"
+  rules:
+    - name: count-zero-absent
+      description: should match because number 0x99 never appears
+      scopes:
+        static: function
+      features:
+        - count(number(0x99)): 0
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      count-zero-absent:
+        - 0x402000
+
+- name: top-level-count-zero-present
+  description: "count(...): 0 at the top level does not match when the feature is present"
+  rules:
+    - name: count-zero-present
+      description: should not match because number 0x99 appears
+      scopes:
+        static: function
+      features:
+        - count(number(0x99)): 0
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+  expect:
+    matches: {}
+
+- name: or-with-not-branch
+  description: an or containing a not branch matches via the not branch alone
+  rules:
+    - name: or-not-branch
+      description: should match because number 0x99 is absent, satisfying the not branch
+      scopes:
+        static: function
+      features:
+        - or:
+            - number: 0x20
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      or-not-branch:
+        - 0x402000
+
+- name: or-with-not-branch-negated
+  description: an or containing a not branch does not match when no branch holds
+  rules:
+    - name: or-not-branch-negated
+      description: should not match because number 0x20 is absent and number 0x99 is present
+      scopes:
+        static: function
+      features:
+        - or:
+            - number: 0x20
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+  expect:
+    matches: {}
+
+- name: or-with-count-zero-branch
+  description: "an or containing a count(...): 0 branch matches via that branch alone"
+  rules:
+    - name: or-count-zero-branch
+      description: should match because number 0x99 never appears
+      scopes:
+        static: function
+      features:
+        - or:
+            - number: 0x20
+            - count(number(0x99)): 0
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      or-count-zero-branch:
+        - 0x402000
+
+- name: and-of-only-nots
+  description: an and of only not statements matches when all negated features are absent
+  rules:
+    - name: and-of-nots
+      description: should match because neither number 0x98 nor number 0x99 is present
+      scopes:
+        static: function
+      features:
+        - and:
+            - not:
+                - number: 0x98
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      and-of-nots:
+        - 0x402000
+
+- name: and-of-only-nots-one-present
+  description: an and of only not statements does not match when a negated feature is present
+  rules:
+    - name: and-of-nots-one-present
+      description: should not match because number 0x99 is present
+      scopes:
+        static: function
+      features:
+        - and:
+            - not:
+                - number: 0x98
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+  expect:
+    matches: {}
+
+- name: or-with-not-and-instruction-subscope
+  description: an or mixing a not branch and an instruction subscope branch matches via the not branch
+  rules:
+    - name: or-not-subscope
+      description: should match because number 0x99 is absent, satisfying the not branch
+      scopes:
+        static: function
+      features:
+        - or:
+            - not:
+                - number: 0x99
+            - instruction:
+                - mnemonic: mov
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x10)
+  expect:
+    matches:
+      or-not-subscope:
+        - 0x402000
+
+- name: or-with-not-and-instruction-subscope-via-subscope
+  description: an or mixing a not branch and an instruction subscope branch matches via the subscope branch
+  rules:
+    - name: or-not-subscope-via-subscope
+      description: should match because one instruction contains mov, even though number 0x99 is present
+      scopes:
+        static: function
+      features:
+        - or:
+            - not:
+                - number: 0x99
+            - instruction:
+                - mnemonic: mov
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+      insn: 0x402004: mnemonic(mov)
+  expect:
+    matches:
+      or-not-subscope-via-subscope:
+        - 0x402000
+
+- name: or-with-not-and-instruction-subscope-negated
+  description: an or mixing a not branch and an instruction subscope branch does not match when no branch holds
+  rules:
+    - name: or-not-subscope-negated
+      description: should not match because number 0x99 is present and no instruction contains mov
+      scopes:
+        static: function
+      features:
+        - or:
+            - not:
+                - number: 0x99
+            - instruction:
+                - mnemonic: mov
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+      insn: 0x402004: mnemonic(add)
+  expect:
+    matches: {}
+
+- name: exclusion-rule-still-uses-feature-index-for-other-rules
+  description: a regular rule alongside unindexable rules is still only matched via its features
+  rules:
+    - name: exclusion-helper
+      description: always evaluated, matches because number 0x99 is absent
+      scopes:
+        static: function
+      features:
+        - not:
+            - number: 0x99
+    - name: regular-indexed-rule
+      description: should not match because its required feature is absent
+      scopes:
+        static: function
+      features:
+        - and:
+            - mnemonic: mov
+            - api: CreateFileW
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: mnemonic(mov)
+  expect:
+    matches:
+      exclusion-helper:
+        - 0x402000
+
+- name: instruction-scope-top-level-not
+  description: an instruction-scope rule with a top-level not matches each instruction lacking the feature
+  rules:
+    - name: instruction-top-level-not
+      description: should match the instruction without number 0x99
+      scopes:
+        static: instruction
+      features:
+        - not:
+            - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: number(0x99)
+      insn: 0x402004: mnemonic(mov)
+  expect:
+    matches:
+      instruction-top-level-not:
+        - 0x402004
+
+- name: basic-block-scope-or-with-not
+  description: a basic-block-scope or with a not branch matches via the not branch alone
+  rules:
+    - name: basic-block-or-not
+      description: should match because number 0x99 is absent from the basic block
+      scopes:
+        static: basic block
+      features:
+        - or:
+            - number: 0x20
+            - not:
+                - number: 0x99
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: mnemonic(mov)
+  expect:
+    matches:
+      basic-block-or-not:
+        - 0x402000
+
+- name: function-scope-count-zero-with-subscope
+  description: "a function-scope count(...): 0 alongside an instruction subscope matches when the count is zero"
+  rules:
+    - name: function-count-zero-subscope
+      description: should match because no instruction uses the eax offset feature and mov is present
+      scopes:
+        static: function
+      features:
+        - and:
+            - count(offset(0x99)): 0
+            - instruction:
+                - mnemonic: mov
+  features: |
+    func: 0x402000
+     bb: 0x402000: basic block
+      insn: 0x402000: mnemonic(mov)
+  expect:
+    matches:
+      function-count-zero-subscope:
+        - 0x402000
