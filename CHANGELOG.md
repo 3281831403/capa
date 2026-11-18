@@ -18,6 +18,7 @@
 
 - fix: elffile: skip section headers with a missing sh_link target @Henglie #3209
 - rules: do not write the ruleset cache when enable_cache is false #3223
+- dynamic: include all processes, threads, and calls referenced by matched rules in the result document layout, and degrade verbose output to pid/tid identifiers when layout entries are missing
 
 ### capa Explorer Web
 

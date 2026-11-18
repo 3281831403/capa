@@ -727,21 +727,34 @@ def compute_dynamic_layout(
     rules: RuleSet, extractor: DynamicFeatureExtractor, capabilities: MatchResults
 ) -> rdoc.DynamicLayout:
     """
-    compute a metadata structure that links threads
-    to the processes in which they're found.
+    compute a metadata structure that links processes, threads, and calls
+    referenced by matched rules.
 
-    only collect the threads at which some rule matched.
+    only collect the processes, threads, and calls at which some rule matched,
+    directly (a rule scoped to that process/thread/call) or indirectly
+    (a call referenced by a higher-scoped match).
     otherwise, we may pollute the json document with
     a large amount of un-referenced data.
     """
     assert isinstance(extractor, DynamicFeatureExtractor)
 
+    matched_processes: set[Address] = set()
+    matched_threads: set[Address] = set()
     matched_calls: set[Address] = set()
 
     def result_rec(result: capa.features.common.Result):
         for loc in result.locations:
-            if isinstance(loc, capa.features.address.DynamicCallAddress):
+            if isinstance(loc, capa.features.address.ProcessAddress):
+                matched_processes.add(loc)
+            elif isinstance(loc, capa.features.address.ThreadAddress):
+                matched_threads.add(loc)
+                # the process that owns the thread is referenced, too
+                matched_processes.add(loc.process)
+            elif isinstance(loc, capa.features.address.DynamicCallAddress):
                 matched_calls.add(loc)
+                # the thread and process that own the call are referenced, too
+                matched_threads.add(loc.thread)
+                matched_processes.add(loc.thread.process)
         for child in result.children:
             result_rec(child)
 
@@ -752,30 +765,29 @@ def compute_dynamic_layout(
     names_by_process: dict[Address, str] = {}
     names_by_call: dict[Address, str] = {}
 
-    matched_processes: set[Address] = set()
-    matched_threads: set[Address] = set()
-
     threads_by_process: dict[Address, list[Address]] = {}
     calls_by_thread: dict[Address, list[Address]] = {}
 
     for p in extractor.get_processes():
+        if p.address not in matched_processes:
+            # don't pollute the layout with processes no matched rule references
+            continue
+
+        names_by_process[p.address] = extractor.get_process_name(p)
         threads_by_process[p.address] = []
 
         for t in extractor.get_threads(p):
+            if t.address not in matched_threads:
+                # don't pollute the layout with threads no matched rule references
+                continue
+
             calls_by_thread[t.address] = []
+            threads_by_process[p.address].append(t.address)
 
             for c in extractor.get_calls(p, t):
                 if c.address in matched_calls:
                     names_by_call[c.address] = extractor.get_call_name(p, t, c)
                     calls_by_thread[t.address].append(c.address)
-
-            if calls_by_thread[t.address]:
-                matched_threads.add(t.address)
-                threads_by_process[p.address].append(t.address)
-
-        if threads_by_process[p.address]:
-            matched_processes.add(p.address)
-            names_by_process[p.address] = extractor.get_process_name(p)
 
     layout = rdoc.DynamicLayout(
         processes=tuple(
@@ -791,16 +803,13 @@ def compute_dynamic_layout(
                                 name=names_by_call[c],
                             )
                             for c in calls_by_thread[t]
-                            if c in matched_calls
                         ),
                     )
-                    for t in threads
-                    if t in matched_threads
+                    for t in threads_by_process[p]
                 ),  # this object is open to extension in the future,
                 # such as with the function name, etc.
             )
-            for p, threads in threads_by_process.items()
-            if p in matched_processes
+            for p in threads_by_process
         )
     )
 

@@ -29,7 +29,7 @@ example::
                  0x10003797
 """
 
-from typing import cast
+from typing import Optional, cast
 
 from rich.text import Text
 from rich.table import Table
@@ -88,15 +88,15 @@ def format_address(address: frz.Address) -> str:
         raise ValueError("unexpected address type")
 
 
-def _get_process_name(layout: rd.DynamicLayout, addr: frz.Address) -> str:
+def _get_process_name(layout: rd.DynamicLayout, addr: frz.Address) -> Optional[str]:
     for p in layout.processes:
         if p.address == addr:
             return p.name
 
-    raise ValueError("name not found for process", addr)
+    return None
 
 
-def _get_call_name(layout: rd.DynamicLayout, addr: frz.Address) -> str:
+def _get_call_name(layout: rd.DynamicLayout, addr: frz.Address) -> Optional[str]:
     call = addr.to_capa()
     assert isinstance(call, capa.features.address.DynamicCallAddress)
 
@@ -111,13 +111,17 @@ def _get_call_name(layout: rd.DynamicLayout, addr: frz.Address) -> str:
                     for c in t.matched_calls:
                         if c.address == addr:
                             return c.name
-    raise ValueError("name not found for call", addr)
+    return None
 
 
 def render_process(layout: rd.DynamicLayout, addr: frz.Address) -> str:
     process = addr.to_capa()
     assert isinstance(process, capa.features.address.ProcessAddress)
     name = _get_process_name(layout, addr)
+    if name is None:
+        # the layout doesn't reference this process (e.g. an older result document),
+        # degrade gracefully using the stable pid identifier instead of crashing
+        return f"process{{pid:{process.pid}}}"
     return f"{name}{{pid:{process.pid}}}"
 
 
@@ -125,6 +129,10 @@ def render_thread(layout: rd.DynamicLayout, addr: frz.Address) -> str:
     thread = addr.to_capa()
     assert isinstance(thread, capa.features.address.ThreadAddress)
     name = _get_process_name(layout, frz.Address.from_capa(thread.process))
+    if name is None:
+        # the layout doesn't reference this thread/process (e.g. an older result document),
+        # degrade gracefully using the stable pid/tid identifiers instead of crashing
+        return f"process{{pid:{thread.process.pid},tid:{thread.tid}}}"
     return f"{name}{{pid:{thread.process.pid},tid:{thread.tid}}}"
 
 
@@ -137,11 +145,17 @@ def render_span_of_calls(layout: rd.DynamicLayout, addrs: list[frz.Address]) -> 
 
     pname = _get_process_name(layout, frz.Address.from_capa(calls[0].thread.process))
     call_ids = [str(call.id) for call in calls]
+    if pname is None:
+        # the layout doesn't reference this process (e.g. an older result document),
+        # degrade gracefully using the stable pid/tid identifiers instead of crashing
+        prefix = f"process{{pid:{call.thread.process.pid},tid:{call.thread.tid}"
+    else:
+        prefix = f"{pname}{{pid:{call.thread.process.pid},tid:{call.thread.tid}"
     if len(call_ids) == 1:
         call_id = call_ids[0]
-        return f"{pname}{{pid:{call.thread.process.pid},tid:{call.thread.tid},call:{call_id}}}"
+        return f"{prefix},call:{call_id}}}"
     else:
-        return f"{pname}{{pid:{call.thread.process.pid},tid:{call.thread.tid},calls:{{{','.join(call_ids)}}}}}"
+        return f"{prefix},calls:{{{','.join(call_ids)}}}}}"
 
 
 def render_call(layout: rd.DynamicLayout, addr: frz.Address) -> str:
@@ -150,6 +164,17 @@ def render_call(layout: rd.DynamicLayout, addr: frz.Address) -> str:
 
     pname = _get_process_name(layout, frz.Address.from_capa(call.thread.process))
     cname = _get_call_name(layout, addr)
+
+    location = f"pid:{call.thread.process.pid},tid:{call.thread.tid},call:{call.id}"
+    if pname is None:
+        # the layout doesn't reference this process (e.g. an older result document),
+        # degrade gracefully using stable identifiers instead of crashing
+        return f"process{{{location}}}"
+
+    if cname is None:
+        # the layout doesn't reference this call (e.g. an older result document),
+        # degrade gracefully: show process/thread/call identifiers without call details
+        return f"{pname}{{{location}}}"
 
     fname, _, rest = cname.partition("(")
     args, _, rest = rest.rpartition(")")
@@ -162,7 +187,7 @@ def render_call(layout: rd.DynamicLayout, addr: frz.Address) -> str:
 
     newline = "\n"
     # Use default (non-dim) styling for API details so they remain readable in -vv output
-    return f"{pname}{{pid:{call.thread.process.pid},tid:{call.thread.tid},call:{call.id}}}\n{newline.join(s)}"
+    return f"{pname}{{{location}}}\n{newline.join(s)}"
 
 
 def render_short_call(layout: rd.DynamicLayout, addr: frz.Address) -> str:
@@ -170,6 +195,11 @@ def render_short_call(layout: rd.DynamicLayout, addr: frz.Address) -> str:
     assert isinstance(call, capa.features.address.DynamicCallAddress)
 
     cname = _get_call_name(layout, addr)
+
+    if cname is None:
+        # the layout doesn't reference this call (e.g. an older result document),
+        # degrade gracefully using the stable call identifier instead of crashing
+        return f"call:{call.id}"
 
     fname, _, rest = cname.partition("(")
     args, _, rest = rest.rpartition(")")
